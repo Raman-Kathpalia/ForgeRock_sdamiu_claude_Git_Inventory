@@ -1,0 +1,16 @@
+---
+- name: Install + start Tomcat (unrestricted-sudo version)
+  hosts: all
+  become: true                 # works because sudo /bin/sh is now permitted
+  gather_facts: false
+  tasks:
+    - name: Install tomcat
+      ansible.builtin.dnf:
+        name: tomcat
+        state: present
+
+    - name: Enable + start tomcat
+      ansible.builtin.systemd_service:   # or ansible.builtin.systemd on older cores
+        name: tomcat
+        enabled: true
+        state: started
