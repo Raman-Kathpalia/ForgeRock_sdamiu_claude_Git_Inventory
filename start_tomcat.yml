@@ -1,0 +1,37 @@
+---
+# start_tomcat.yml
+# Enables + starts Tomcat on all nodes and verifies it is active.
+#
+# Runs WITHOUT Ansible `become`; uses explicit `sudo -n` against commands
+# authorized by /etc/sudoers.d/sudo_tomcat_infra. Keep "Privilege Escalation"
+# UNCHECKED on the Job Template.
+#
+- name: Start and enable Tomcat
+  hosts: all
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Enable tomcat on boot
+      ansible.builtin.command:
+        cmd: sudo -n /usr/bin/systemctl enable tomcat
+      register: en
+      changed_when: "'Created symlink' in (en.stdout + en.stderr)"
+      failed_when: en.rc != 0
+
+    - name: Start tomcat
+      ansible.builtin.command:
+        cmd: sudo -n /usr/bin/systemctl start tomcat
+      register: st
+      changed_when: true
+      failed_when: st.rc != 0
+
+    - name: Verify tomcat is active
+      ansible.builtin.command:
+        cmd: sudo -n /usr/bin/systemctl is-active tomcat
+      register: active
+      changed_when: false
+      failed_when: active.stdout.strip() != 'active'
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "Tomcat on {{ inventory_hostname }} is {{ active.stdout.strip() }}"

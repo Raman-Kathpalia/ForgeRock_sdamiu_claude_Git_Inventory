@@ -1,0 +1,45 @@
+---
+# install_tomcat.yml
+# Installs Apache Tomcat (RHEL 9 AppStream) on all nodes.
+#
+# Runs WITHOUT Ansible `become`. Each privileged step calls `sudo -n <cmd>`
+# explicitly, where <cmd> is authorized by /etc/sudoers.d/sudo_tomcat_infra.
+# Do NOT enable "Privilege Escalation" on the Job Template — that would make
+# Ansible wrap the module in `sudo /bin/sh -c ...`, which the lockdown blocks.
+#
+# Works on either inventory (bulk or git) because it targets `all`.
+#
+- name: Install Tomcat on all nodes
+  hosts: all
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Confirm AppStream repo is reachable (no sudo needed)
+      ansible.builtin.command:
+        cmd: dnf repolist --enabled
+      register: repolist
+      changed_when: false
+      failed_when: false
+
+    - name: Fail early if AppStream is missing
+      ansible.builtin.fail:
+        msg: "AppStream not enabled on {{ inventory_hostname }} — register the system before installing Tomcat."
+      when: "'appstream' not in (repolist.stdout | lower)"
+
+    - name: Install tomcat (dnf pulls Java + deps within this single sudo'd call)
+      ansible.builtin.command:
+        cmd: sudo -n /usr/bin/dnf install -y tomcat
+      register: dnf_result
+      changed_when: "'Nothing to do' not in dnf_result.stdout"
+      failed_when: dnf_result.rc != 0
+
+    - name: Confirm the tomcat unit is present (rc 3 = loaded-but-inactive, expected)
+      ansible.builtin.command:
+        cmd: sudo -n /usr/bin/systemctl status tomcat
+      register: unit_check
+      changed_when: false
+      failed_when: unit_check.rc not in [0, 3]
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "Tomcat installed on {{ inventory_hostname }}"

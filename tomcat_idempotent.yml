@@ -1,0 +1,64 @@
+---
+# tomcat_idempotent.yml
+# Runs against ALL 3 nodes. Idempotent: each node is checked first and only
+# changed if not already in the desired state. k8s-master (set up manually with
+# `dnf install` + `systemctl enable --now`) will show every ACTION task as
+# "skipping" — it is skipped *because it is already converged*, not by exclusion.
+#
+# Locked-down sdamiu model: become:false + explicit allowlisted `sudo -n`.
+# Read-only checks (rpm -q, systemctl is-enabled/is-active) need no sudo.
+#
+- name: Converge Tomcat (install + autostart) idempotently
+  hosts: all
+  become: false
+  gather_facts: false
+  tasks:
+    # ---- DISCOVER current state (no sudo needed) ----
+    - name: Is tomcat installed?
+      ansible.builtin.command: rpm -q tomcat
+      register: t_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Is tomcat enabled?
+      ansible.builtin.command: systemctl is-enabled tomcat
+      register: t_enabled
+      changed_when: false
+      failed_when: false
+
+    - name: Is tomcat active?
+      ansible.builtin.command: systemctl is-active tomcat
+      register: t_active
+      changed_when: false
+      failed_when: false
+
+    # ---- CONVERGE only where needed (allowlisted sudo) ----
+    - name: Install tomcat (only if missing)
+      ansible.builtin.command: sudo -n /usr/bin/dnf install -y tomcat
+      when: t_installed.rc != 0
+      register: t_install
+      changed_when: "'Nothing to do' not in t_install.stdout"
+
+    - name: Enable tomcat on boot (only if not enabled)
+      ansible.builtin.command: sudo -n /usr/bin/systemctl enable tomcat
+      when: t_enabled.stdout | trim != 'enabled'
+      changed_when: true
+
+    - name: Start tomcat (only if not running)
+      ansible.builtin.command: sudo -n /usr/bin/systemctl start tomcat
+      when: t_active.stdout | trim != 'active'
+      changed_when: true
+
+    # ---- VERIFY final state on every host ----
+    - name: Confirm tomcat is active everywhere
+      ansible.builtin.command: systemctl is-active tomcat
+      register: t_final
+      changed_when: false
+      failed_when: t_final.stdout | trim != 'active'
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          installed={{ t_installed.rc == 0 }} (was)
+          -> now active={{ t_final.stdout | trim }}
